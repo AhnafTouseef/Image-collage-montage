@@ -145,6 +145,18 @@ def create_task_thumbnail(image_paths, size=(60, 60)):
     return ImageTk.PhotoImage(thumb)
 
 
+def center_window(win):
+    win.update_idletasks()  # Ensure size info is up to date
+    width = win.winfo_width()
+    height = win.winfo_height()
+    screen_width = win.winfo_screenwidth()
+    screen_height = win.winfo_screenheight()
+    x = (screen_width // 2) - (width // 2)
+    y = (screen_height // 2) - (height // 2)
+    win.geometry(f"+{x}+{y}")
+
+
+
 
 # ---------- Task ----------
 class Task:
@@ -179,6 +191,17 @@ class MontageGUI:
         self.task_frames = []
         self.create_widgets()
         self.master.after(100,self.update_progress)
+        center_window(master)
+
+    def add_task_with_images(self):
+        from tkinter import filedialog
+        file_paths = filedialog.askopenfilenames(
+            title="Select Images",
+            filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp;*.tiff")]
+        )
+        if file_paths:
+            self.open_intermediate(list(file_paths))
+
 
     def create_widgets(self):
         style = ttk.Style()
@@ -186,11 +209,11 @@ class MontageGUI:
         style.configure("green.Horizontal.TProgressbar", troughcolor='white', background='green')
         control_frame = ttk.Frame(self.master)
         control_frame.pack(fill=X,padx=10,pady=5)
-        ttk.Button(control_frame,text="Add Task",command=self.open_intermediate).pack(side=LEFT,padx=5)
+        ttk.Button(control_frame,text="Add Task",command=self.add_task_with_images).pack(side=LEFT, padx=5)
         ttk.Button(control_frame,text="Start All",command=self.start_all_tasks).pack(side=LEFT,padx=5)
         ttk.Button(control_frame,text="Clear All Tasks",command=self.clear_all_tasks).pack(side=LEFT,padx=5)
-        ttk.Entry(control_frame,textvariable=self.dest_dir,width=50).pack(side=LEFT,padx=5)
-        ttk.Button(control_frame,text="Select Destination",command=self.select_dest).pack(side=LEFT,padx=5)
+        ttk.Entry(control_frame,textvariable=self.dest_dir,width=50).pack(side=LEFT,padx=5, fill=X, expand=True)
+        ttk.Button(control_frame,text="Select Destination",command=self.select_dest).pack(side=RIGHT,padx=5)
 
         # Task cards canvas
         self.canvas_frame = Frame(self.master)
@@ -203,20 +226,7 @@ class MontageGUI:
         self.cards_frame = ttk.Frame(self.canvas)
         self.canvas.create_window((0,0), window=self.cards_frame, anchor="nw")
         self.cards_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
-
-        # Bottom progress bar
-        self.progress = ttk.Progressbar(self.master,orient=HORIZONTAL,length=800,mode='determinate',style="green.Horizontal.TProgressbar")
-        self.progress.pack(side=BOTTOM,pady=5,fill=X,padx=10)
-
-
-        def remove_image_by_index(self, images, selected_indices, frame, index):
-            # guard
-            if 0 <= index < len(images):
-                images.pop(index)
-            selected_indices.clear()
-            self.refresh_thumbnails(images, selected_indices, frame)
-
-
+        
 
     # ---------- Task List Refresh ----------
     def refresh_task_list(self):
@@ -235,14 +245,19 @@ class MontageGUI:
             else:
                 frame.config(style='TFrame')
 
+            # Subframes
+            subframe_image = ttk.Frame(frame)
+            subframe_info = ttk.Frame(frame)
+            subframe_buttons = ttk.Frame(frame)
+
             # Thumbnail (or placeholder)
             task.thumbnail = create_task_thumbnail(task.images)
-            lbl_img = Label(frame, image=task.thumbnail, width=60, height=60)
+            lbl_img = Label(subframe_image, image=task.thumbnail, width=60, height=60)
 
             lbl_img.pack(side=LEFT, padx=5)
 
             # Per-task progress bar
-            task.progressbar = ttk.Progressbar(frame, orient=HORIZONTAL, length=430, mode='determinate')
+            task.progressbar = ttk.Progressbar(subframe_info, orient=HORIZONTAL, length=430, mode='determinate')
             task.progressbar.pack(side=TOP, anchor=W, padx=5, pady=2)
             task.progressbar['value'] = 0
             task.progressbar['maximum'] = len(task.images)  # optional initial max
@@ -255,37 +270,56 @@ class MontageGUI:
             if task.subfolder_name:
                 dest_path = os.path.join(dest_path, task.subfolder_name)
 
-            lbl_text = Label(
-                frame,
-                text=(
-                    f"{len(task.images)} images | "
-                    f"{task.page_type} | "
-                    f"{task.rows}x{task.cols} | "
-                    f"{dest_path} | "
-                    f"{task.status}"
-                ),
-                width=60,
-                anchor=W,
-                justify=LEFT,
-                wraplength=600
-            )
-            lbl_text.pack(side=LEFT, padx=5)
+            lbl_text1 = Label(subframe_info, text=(f"{len(task.images)} images | "f"{task.page_type} | "f"{task.rows}x{task.cols} | "),width=60,anchor=W,justify=LEFT,wraplength=600)
+            lbl_text1.pack(side=TOP, padx=5)
 
+            lbl_text2 = Label(subframe_info,text=(f"{dest_path} | "f"{task.status}"),width=60,anchor=W,justify=LEFT,wraplength=600)
+            lbl_text2.pack(side=TOP, padx=5)
 
             # Buttons
-            ttk.Button(frame, text="Edit", command=lambda i=idx: self.edit_task(i)).pack(side=LEFT, padx=5)
-            ttk.Button(frame, text="Remove", command=lambda i=idx: self.remove_task(i)).pack(side=LEFT, padx=5)
-            ttk.Button(frame, text="Start", command=lambda i=idx: self.run_task(i)).pack(side=LEFT, padx=5)
+            ttk.Button(subframe_buttons, text="Edit", command=lambda i=idx: self.edit_task(i)).pack(side=LEFT, padx=5)
+            ttk.Button(subframe_buttons, text="Remove", command=lambda i=idx: self.remove_task(i)).pack(side=LEFT, padx=5)
+            ttk.Button(subframe_buttons, text="Start", command=lambda i=idx: self.run_task(i)).pack(side=LEFT, padx=5)
+
+            # pack subframes
+            subframe_image.pack(side=LEFT)
+            subframe_info.pack(side=LEFT)
+            subframe_buttons.pack(side=LEFT)
+
+
+            def _bind_mousewheel(widget):
+                if os.name == 'nt':          # Windows
+                    widget.bind_all("<MouseWheel>", lambda e: widget.yview_scroll(int(-1*(e.delta/120)), "units"))
+                elif os.name == 'mac':       # macOS (rarely 'mac' — safer to check platform if you need)
+                    widget.bind_all("<MouseWheel>", lambda e: widget.yview_scroll(int(-1*e.delta), "units"))
+                else:                        # Linux/others (X11)
+                    widget.bind_all("<Button-4>", lambda e: widget.yview_scroll(-1, "units"))
+                    widget.bind_all("<Button-5>", lambda e: widget.yview_scroll(1, "units"))
+
+
+            # bind mouse wheel only while pointer is over the canvas (prevents global interference)
+            def _on_enter(e):
+                _bind_mousewheel(self.canvas)
+            def _on_leave(e):
+                try:
+                    self.canvas.unbind_all("<MouseWheel>")
+                    self.canvas.unbind_all("<Button-4>")
+                    self.canvas.unbind_all("<Button-5>")
+                except Exception:
+                    pass
+
+            self.canvas.bind("<Enter>", _on_enter)
+            self.canvas.bind("<Leave>", _on_leave)
 
 
             # Select task on click
-            def select_task_event(event, i=idx):
-                self.selected_task_index = i
-                self.refresh_task_list()
+            # def select_task_event(event, i=idx):
+            #     self.selected_task_index = i
+            #     self.refresh_task_list()
 
-            frame.bind("<Button-1>", select_task_event)
-            lbl_img.bind("<Button-1>", select_task_event)
-            lbl_text.bind("<Button-1>", select_task_event)
+            # frame.bind("<Button-1>", select_task_event)
+            # lbl_img.bind("<Button-1>", select_task_event)
+            # lbl_text.bind("<Button-1>", select_task_event)
 
 
     def select_task(self,index):
@@ -376,15 +410,18 @@ class MontageGUI:
 
 
     # ---------- Intermediate Window ----------
-    def open_intermediate(self):
-        images=[]
+    def open_intermediate(self, images=None):
+        if images is None:
+            images = []
+
         selected_indices=set()
         win = Toplevel(self.master)
         win.title("Setup Task")
         win.transient(self.master)
         win.grab_set()
         win.lift()
-        win.geometry("500x550")
+        win.geometry("550x450")
+        center_window(win)
         # Page type
         page_type_var = StringVar(value="A4")
         ttk.Label(win,text="Page Type:").pack(anchor=W)
@@ -400,22 +437,65 @@ class MontageGUI:
         ttk.Entry(grid_frame,textvariable=cols_var,width=5).pack(side=LEFT,padx=5)
         # Subfolder option
         subfolder_var = StringVar()
-        chk = ttk.Checkbutton(win, text="Use subfolder for this task", variable=subfolder_var, onvalue="1", offvalue="", command=lambda: entry_subfolder.configure(state=NORMAL if subfolder_var.get()=="1" else DISABLED))
+        chk = ttk.Checkbutton(win, text="Use subfolder for output", variable=subfolder_var, onvalue="1", offvalue="", command=lambda: entry_subfolder.configure(state=NORMAL if subfolder_var.get()=="1" else DISABLED))
         chk.pack(anchor=W, pady=5)
         entry_subfolder = ttk.Entry(win)
         entry_subfolder.pack(anchor=W, padx=20)
         entry_subfolder.configure(state=DISABLED)
 
-        # Thumbnails
-        thumb_canvas = Canvas(win,height=250)
-        thumb_canvas.pack(fill=BOTH,expand=True,padx=5,pady=5)
-        scrollbar = ttk.Scrollbar(win, orient=VERTICAL, command=thumb_canvas.yview)
-        scrollbar.pack(side=RIGHT, fill=Y)
-        thumb_canvas.configure(yscrollcommand=scrollbar.set)
+                # --- Thumbnails (fixed scrollbar position) ---
+        # container to hold canvas + scrollbar so scrollbar stays next to canvas
+        thumb_container = ttk.Frame(win)
+        thumb_container.pack(fill=BOTH, expand=True, padx=5, pady=5)
+
+        thumb_canvas = Canvas(thumb_container, height=250)
+        thumb_canvas.pack(side=LEFT, fill=BOTH, expand=True)
+
+        thumb_scrollbar = ttk.Scrollbar(thumb_container, orient=VERTICAL, command=thumb_canvas.yview)
+        thumb_scrollbar.pack(side=RIGHT, fill=Y)
+
+        thumb_canvas.configure(yscrollcommand=thumb_scrollbar.set)
+
         thumb_frame = ttk.Frame(thumb_canvas)
-        thumb_canvas.create_window((0,0),window=thumb_frame,anchor='nw')
-        thumb_frame.bind("<Configure>", lambda e: thumb_canvas.configure(scrollregion=thumb_canvas.bbox("all")))
-        self.refresh_thumbnails(images,selected_indices,thumb_frame)
+        thumb_window = thumb_canvas.create_window((0, 0), window=thumb_frame, anchor='nw')
+
+        # keep canvas scrollregion up-to-date when inner frame changes
+        def _on_frame_configure(event):
+            thumb_canvas.configure(scrollregion=thumb_canvas.bbox("all"))
+        thumb_frame.bind("<Configure>", _on_frame_configure)
+
+        # make the inner frame match canvas width (so widgets wrap correctly)
+        def _on_canvas_configure(event):
+            thumb_canvas.itemconfig(thumb_window, width=event.width)
+        thumb_canvas.bind("<Configure>", _on_canvas_configure)
+
+        # optional: mouse wheel scrolling when pointer is over the canvas
+        def _bind_mousewheel(widget):
+            if os.name == 'nt':          # Windows
+                widget.bind_all("<MouseWheel>", lambda e: widget.yview_scroll(int(-1*(e.delta/120)), "units"))
+            elif os.name == 'mac':       # macOS (rarely 'mac' — safer to check platform if you need)
+                widget.bind_all("<MouseWheel>", lambda e: widget.yview_scroll(int(-1*e.delta), "units"))
+            else:                        # Linux/others (X11)
+                widget.bind_all("<Button-4>", lambda e: widget.yview_scroll(-1, "units"))
+                widget.bind_all("<Button-5>", lambda e: widget.yview_scroll(1, "units"))
+
+        # bind mouse wheel only while pointer is over the canvas (prevents global interference)
+        def _on_enter(e):
+            _bind_mousewheel(thumb_canvas)
+        def _on_leave(e):
+            try:
+                thumb_canvas.unbind_all("<MouseWheel>")
+                thumb_canvas.unbind_all("<Button-4>")
+                thumb_canvas.unbind_all("<Button-5>")
+            except Exception:
+                pass
+
+        thumb_canvas.bind("<Enter>", _on_enter)
+        thumb_canvas.bind("<Leave>", _on_leave)
+
+        # finally populate thumbnails
+        self.refresh_thumbnails(images, selected_indices, thumb_frame)
+
 
         from datetime import datetime
 
@@ -510,7 +590,8 @@ class MontageGUI:
         win.transient(self.master)
         win.grab_set()
         win.lift()
-        win.geometry("500x550")
+        win.geometry("550x450")
+        center_window(win)
         # Page type
         page_type_var = StringVar(value=task.page_type)
 
@@ -530,7 +611,7 @@ class MontageGUI:
         subfolder_var = StringVar(value="1" if task.subfolder_name else "")
         chk = ttk.Checkbutton(
             win,
-            text="Use subfolder for this task",
+            text="Use subfolder for output",
             variable=subfolder_var,
             onvalue="1",
             offvalue="",
