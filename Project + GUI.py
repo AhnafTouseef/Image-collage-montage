@@ -104,6 +104,47 @@ def make_pages(task_images, page_size, rows, cols, dest_dir, progress_callback, 
         out_name = os.path.join(dest_dir, f"task{task_index:02d}_page_{(pidx//MAX_PER_PAGE)+1:03d}.png")
         canvas.save(out_name, dpi=(DPI, DPI))
 
+def create_task_thumbnail(image_paths, size=(60, 60)):
+    """
+    Creates a 2x2 grid thumbnail from up to 4 images,
+    scaling/cropping each to completely fill its cell.
+    """
+    from PIL import Image, ImageTk
+    import numpy as np
+    import cv2
+
+    def scale_and_crop(img, cell_w, cell_h):
+        img_w, img_h = img.size
+        scale = max(cell_w / img_w, cell_h / img_h)
+        new_w = int(round(img_w * scale))
+        new_h = int(round(img_h * scale))
+        img_resized = img.resize((new_w, new_h), resample=Image.LANCZOS)
+
+        crop_x = (new_w - cell_w) // 2
+        crop_y = (new_h - cell_h) // 2
+        return img_resized.crop((crop_x, crop_y, crop_x + cell_w, crop_y + cell_h))
+
+    thumb = Image.new("RGB", size, (200, 200, 200))  # base gray background
+    positions = [
+        (0, 0),
+        (size[0] // 2, 0),
+        (0, size[1] // 2),
+        (size[0] // 2, size[1] // 2)
+    ]
+    cell_w, cell_h = size[0] // 2, size[1] // 2
+
+    for i, img_path in enumerate(image_paths[:4]):
+        try:
+            img = Image.open(img_path)
+            cell_img = scale_and_crop(img, cell_w, cell_h)
+            x, y = positions[i]
+            thumb.paste(cell_img, (x, y))
+        except:
+            continue
+
+    return ImageTk.PhotoImage(thumb)
+
+
 
 # ---------- Task ----------
 class Task:
@@ -169,9 +210,12 @@ class MontageGUI:
 
 
         def remove_image_by_index(self, images, selected_indices, frame, index):
-            images.pop(index)
+            # guard
+            if 0 <= index < len(images):
+                images.pop(index)
             selected_indices.clear()
             self.refresh_thumbnails(images, selected_indices, frame)
+
 
 
     # ---------- Task List Refresh ----------
@@ -192,12 +236,9 @@ class MontageGUI:
                 frame.config(style='TFrame')
 
             # Thumbnail (or placeholder)
-            if task.thumbnail:
-                lbl_img = Label(frame, image=task.thumbnail)
-            else:
-                placeholder = Image.new('RGB', (60, 60), (200, 200, 200))
-                task.thumbnail = ImageTk.PhotoImage(placeholder)
-                lbl_img = Label(frame, image=task.thumbnail)
+            task.thumbnail = create_task_thumbnail(task.images)
+            lbl_img = Label(frame, image=task.thumbnail, width=60, height=60)
+
             lbl_img.pack(side=LEFT, padx=5)
 
             # Per-task progress bar
@@ -259,8 +300,31 @@ class MontageGUI:
             self.run_task(self.selected_task_index)
 
     def start_all_tasks(self):
-        for idx,_ in enumerate(self.tasks):
-            self.run_task(idx)
+        # Disable the button while processing
+        self.master.after(0, lambda: self.disable_buttons(True))
+
+        def run_all():
+            for idx, task in enumerate(self.tasks):
+                task.status = "Processing"
+                self.refresh_task_list()
+                self.run_task(idx)  # run_task updates per-task progress
+
+                # Wait until this task finishes
+                while task.status == "Processing":
+                    self.master.update()
+            self.master.after(0, lambda: self.disable_buttons(False))
+
+        threading.Thread(target=run_all, daemon=True).start()
+
+    def disable_buttons(self, disable=True):
+        for child in self.master.winfo_children():
+            if isinstance(child, ttk.Frame):
+                for btn in child.winfo_children():
+                    if isinstance(btn, ttk.Button):
+                        btn.config(state=DISABLED if disable else NORMAL)
+
+
+
 
     def clear_all_tasks(self):
         global stop_flag
@@ -279,26 +343,36 @@ class MontageGUI:
         task = self.tasks[index]
         task.status = "Processing"
         self.refresh_task_list()
+
         page_size = PAGE_SIZES.get(task.page_type, PAGE_SIZES["A4"])
 
-        # Define callback to update the task's own progress bar
-        def progress_callback(current, total):
-            self.master.after(0, lambda: [
-                task.progressbar.config(value=current, maximum=total)
-            ])
+        # Choose destination directory, respecting per-task subfolder
+        dest_dir = self.dest_dir.get()
+        if task.subfolder_name:
+            # sanitize/normalize just in case
+            dest_dir = os.path.join(dest_dir, os.path.basename(task.subfolder_name))
 
-        # Run make_pages in a separate thread so GUI doesn't freeze
-        threading.Thread(
-            target=lambda: [
-                make_pages(task.images, page_size, task.rows, task.cols, self.dest_dir.get(), progress_callback, index + 1),
-                self.master.after(0, lambda: [
-                    setattr(task, 'status', 'Done'),
-                    task.progressbar.config(value=0),
+        # progress callback to safely update the GUI progressbar
+        def progress_callback(current, total):
+            # update in main thread
+            self.master.after(0, lambda: task.progressbar.config(value=current, maximum=total))
+
+        # worker function
+        def worker():
+            try:
+                make_pages(task.images, page_size, task.rows, task.cols, dest_dir, progress_callback, index + 1)
+            finally:
+                # on finish, update status and clear progress in main thread
+                def finish_updates():
+                    task.status = "Done"
+                    try:
+                        task.progressbar.config(value=0)
+                    except Exception:
+                        pass
                     self.refresh_task_list()
-                ])
-            ],
-            daemon=True
-        ).start()
+                self.master.after(0, finish_updates)
+
+        threading.Thread(target=worker, daemon=True).start()
 
 
     # ---------- Intermediate Window ----------
