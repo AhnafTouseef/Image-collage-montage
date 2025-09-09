@@ -1,0 +1,1 @@
+pyinstaller -w Montage.py --onefile --add-data "C:\Users\lenovo\AppData\Local\Programs\Python\Python312\Lib\site-packages\cv2\data\haarcascade_frontalface_default.xml;." --add-data "ICON.png;." --add-data "Author1.png;." --add-data "Author2.png;." --splash ICON.png --icon ICON.png
